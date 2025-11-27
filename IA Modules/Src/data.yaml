@@ -1,0 +1,8 @@
+path: .../Data/my_objects
+
+train: images/train
+val: images/val
+
+names:
+ 0: coral
+ 1: note
