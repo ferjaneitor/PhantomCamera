@@ -363,10 +363,10 @@ public class CameraGrayscaleEdgeAndComponentsTest {
                 continue;
             }
 
-            int minimumPixelXPosition = edgeConnectedComponent.minimumPixelXPosition;
-            int maximumPixelXPosition = edgeConnectedComponent.maximumPixelXPosition;
-            int minimumPixelYPosition = edgeConnectedComponent.minimumPixelYPosition;
-            int maximumPixelYPosition = edgeConnectedComponent.maximumPixelYPosition;
+            int minimumPixelXPosition = edgeConnectedComponent.minimumXCoordinate;
+            int maximumPixelXPosition = edgeConnectedComponent.maximumXCoordinate;
+            int minimumPixelYPosition = edgeConnectedComponent.minimumYCoordinate;
+            int maximumPixelYPosition = edgeConnectedComponent.maximumYCoordinate;
 
             int boundingBoxWidthInPixels =
                     maximumPixelXPosition - minimumPixelXPosition + 1;

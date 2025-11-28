@@ -2,12 +2,12 @@ package org.PhantomCamera.AprilTags;
 
 public class PixelCoordinate {
 
-        public final int xPixelPosition;
-        public final int yPixelPosition;
+        public final int xPixeldCoordinate;
+        public final int yPixeldCoordinate;
 
-        public PixelCoordinate(int xPixelPosition, int yPixelPosition) {
-            this.xPixelPosition = xPixelPosition;
-            this.yPixelPosition = yPixelPosition;
+        public PixelCoordinate(int xPixeldCoordinate, int yPixeldCoordinate) {
+            this.xPixeldCoordinate = xPixeldCoordinate;
+            this.yPixeldCoordinate = yPixeldCoordinate;
         }
 
 }

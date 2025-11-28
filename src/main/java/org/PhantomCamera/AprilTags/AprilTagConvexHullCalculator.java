@@ -27,15 +27,15 @@ public class AprilTagConvexHullCalculator {
                             PixelCoordinate firstPixelPosition,
                             PixelCoordinate secondPixelPosition
                     ) {
-                        if (firstPixelPosition.xPixelPosition != secondPixelPosition.xPixelPosition) {
+                        if (firstPixelPosition.xPixeldCoordinate != secondPixelPosition.xPixeldCoordinate) {
                             return Integer.compare(
-                                    firstPixelPosition.xPixelPosition,
-                                    secondPixelPosition.xPixelPosition
+                                    firstPixelPosition.xPixeldCoordinate,
+                                    secondPixelPosition.xPixeldCoordinate
                             );
                         }
                         return Integer.compare(
-                                firstPixelPosition.yPixelPosition,
-                                secondPixelPosition.yPixelPosition
+                                firstPixelPosition.yPixeldCoordinate,
+                                secondPixelPosition.yPixeldCoordinate
                         );
                     }
                 }
@@ -125,14 +125,14 @@ public class AprilTagConvexHullCalculator {
             PixelCoordinate secondPixelPosition
     ) {
         long firstVectorXComponent =
-                firstPixelPosition.xPixelPosition - originPixelPosition.xPixelPosition;
+                firstPixelPosition.xPixeldCoordinate - originPixelPosition.xPixeldCoordinate;
         long firstVectorYComponent =
-                firstPixelPosition.yPixelPosition - originPixelPosition.yPixelPosition;
+                firstPixelPosition.yPixeldCoordinate - originPixelPosition.yPixeldCoordinate;
 
         long secondVectorXComponent =
-                secondPixelPosition.xPixelPosition - originPixelPosition.xPixelPosition;
+                secondPixelPosition.xPixeldCoordinate - originPixelPosition.xPixeldCoordinate;
         long secondVectorYComponent =
-                secondPixelPosition.yPixelPosition - originPixelPosition.yPixelPosition;
+                secondPixelPosition.yPixeldCoordinate - originPixelPosition.yPixeldCoordinate;
 
         return firstVectorXComponent * secondVectorYComponent
                 - firstVectorYComponent * secondVectorXComponent;

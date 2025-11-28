@@ -1,6 +1,5 @@
 package org.PhantomCamera.AprilTags;
 
-import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 
 import java.util.ArrayList;
@@ -51,59 +50,55 @@ public class AprilTagEdgeComponentExtractor {
      * @param edgeBinaryFrameMatrix binary edge frame (one channel, 8-bit)
      * @return list of connected components found in the frame
      */
-    public List<EdgeConnectedComponent> extractEdgeConnectedComponentList(
-            Mat edgeBinaryFrameMatrix
-    ) {
+    public List<EdgeConnectedComponent> extractEdgeConnectedComponentList(Mat edgeBinaryFrameMatrix) {
+
         if (edgeBinaryFrameMatrix.empty()) {
             return new ArrayList<>();
         }
 
         if (edgeBinaryFrameMatrix.cols() != frameWidthInPixels
-                || edgeBinaryFrameMatrix.rows() != frameHeightInPixels
-                || edgeBinaryFrameMatrix.type() != CvType.CV_8UC1) {
+                || edgeBinaryFrameMatrix.rows() != frameHeightInPixels) {
             throw new IllegalArgumentException(
-                    "Input edge frame size or type does not match edge component extractor configuration. " +
+                    "Input edge frame size does not match edge component extractor configuration. " +
                             "Expected " + frameWidthInPixels + "x" + frameHeightInPixels +
-                            " CV_8UC1 but received " + edgeBinaryFrameMatrix.cols() +
-                            "x" + edgeBinaryFrameMatrix.rows() +
-                            " type " + edgeBinaryFrameMatrix.type()
+                            " but received " + edgeBinaryFrameMatrix.cols() +
+                            "x" + edgeBinaryFrameMatrix.rows()
             );
         }
 
         int totalPixelCount = frameWidthInPixels * frameHeightInPixels;
 
-        // Copy edge frame data into our reusable array
+        // Copy binary edge data into reusable array
         edgeBinaryFrameMatrix.get(0, 0, edgeBinaryByteArray);
 
-        // Reset visited flags
+        // Reset visited pixels
         Arrays.fill(visitedPixelBooleanArray, false);
 
         List<EdgeConnectedComponent> edgeConnectedComponentList = new ArrayList<>();
 
-        // Scan entire image to find unvisited edge pixels
-        for (int pixelYPosition = 0; pixelYPosition < frameHeightInPixels; pixelYPosition++) {
-            int rowStartPixelIndex = pixelYPosition * frameWidthInPixels;
+        int nextComponentLabelValue = 1;
 
-            for (int pixelXPosition = 0; pixelXPosition < frameWidthInPixels; pixelXPosition++) {
-                int pixelIndex = rowStartPixelIndex + pixelXPosition;
+        for (int pixelIndex = 0; pixelIndex < totalPixelCount; pixelIndex++) {
 
-                int pixelIntensityValue = edgeBinaryByteArray[pixelIndex] & 0xFF;
+            if (visitedPixelBooleanArray[pixelIndex]) {
+                continue;
+            }
 
-                if (pixelIntensityValue == 0) {
-                    // Not an edge pixel
-                    continue;
-                }
+            int pixelIntensityValue = edgeBinaryByteArray[pixelIndex] & 0xFF;
+            if (pixelIntensityValue == 0) {
+                // background pixel
+                continue;
+            }
 
-                if (visitedPixelBooleanArray[pixelIndex]) {
-                    // Already assigned to a component
-                    continue;
-                }
+            EdgeConnectedComponent edgeConnectedComponent =
+                    performBreadthFirstSearchFromSeedPixelIndex(
+                            pixelIndex,
+                            nextComponentLabelValue
+                    );
 
-                // New component found: perform a breadth-first search to collect all connected pixels
-                EdgeConnectedComponent edgeConnectedComponent =
-                        performBreadthFirstSearchFromSeedPixelIndex(pixelIndex);
-
+            if (edgeConnectedComponent.componentPixelCount > 0) {
                 edgeConnectedComponentList.add(edgeConnectedComponent);
+                nextComponentLabelValue++;
             }
         }
 
@@ -113,13 +108,19 @@ public class AprilTagEdgeComponentExtractor {
     /**
      * Performs a breadth-first search starting from the given seed pixel index and
      * returns a connected component with all reachable edge pixels.
+     * Connectivity is 8-connected.
      *
-     * @param seedPixelIndex starting pixel index
+     * @param seedPixelIndex      starting pixel index
+     * @param componentLabelValue label assigned to this component
      * @return connected component containing all pixels in this region
      */
     private EdgeConnectedComponent performBreadthFirstSearchFromSeedPixelIndex(
-            int seedPixelIndex
+            int seedPixelIndex,
+            int componentLabelValue
     ) {
+        EdgeConnectedComponent edgeConnectedComponent =
+                new EdgeConnectedComponent(componentLabelValue);
+
         int queueHeadIndex = 0;
         int queueTailIndex = 0;
 
@@ -128,43 +129,18 @@ public class AprilTagEdgeComponentExtractor {
 
         visitedPixelBooleanArray[seedPixelIndex] = true;
 
-        int componentPixelCount = 0;
-
-        int minimumPixelXPosition = Integer.MAX_VALUE;
-        int maximumPixelXPosition = Integer.MIN_VALUE;
-        int minimumPixelYPosition = Integer.MAX_VALUE;
-        int maximumPixelYPosition = Integer.MIN_VALUE;
-
-        List<PixelCoordinate> pixelCoordinateList = new ArrayList<>();
-
         while (queueHeadIndex < queueTailIndex) {
-            int currentPixelIndex = breadthFirstSearchQueuePixelIndexArray[queueHeadIndex];
+            int currentPixelIndex =
+                    breadthFirstSearchQueuePixelIndexArray[queueHeadIndex];
             queueHeadIndex++;
 
             int currentPixelYPosition = currentPixelIndex / frameWidthInPixels;
             int currentPixelXPosition = currentPixelIndex % frameWidthInPixels;
 
-            // Update bounding box
-            if (currentPixelXPosition < minimumPixelXPosition) {
-                minimumPixelXPosition = currentPixelXPosition;
-            }
-            if (currentPixelXPosition > maximumPixelXPosition) {
-                maximumPixelXPosition = currentPixelXPosition;
-            }
-            if (currentPixelYPosition < minimumPixelYPosition) {
-                minimumPixelYPosition = currentPixelYPosition;
-            }
-            if (currentPixelYPosition > maximumPixelYPosition) {
-                maximumPixelYPosition = currentPixelYPosition;
-            }
-
-            componentPixelCount++;
-
-            pixelCoordinateList.add(
-                    new PixelCoordinate(
-                            currentPixelXPosition,
-                            currentPixelYPosition
-                    )
+            // Update component (count, bounding box and pixel list)
+            edgeConnectedComponent.updateWithPixel(
+                    currentPixelXPosition,
+                    currentPixelYPosition
             );
 
             // Explore 8-connected neighbors
@@ -203,6 +179,7 @@ public class AprilTagEdgeComponentExtractor {
                             edgeBinaryByteArray[neighborPixelIndex] & 0xFF;
 
                     if (neighborPixelIntensityValue == 0) {
+                        // background neighbor, skip
                         continue;
                     }
 
@@ -214,14 +191,7 @@ public class AprilTagEdgeComponentExtractor {
             }
         }
 
-        return new EdgeConnectedComponent(
-                componentPixelCount,
-                minimumPixelXPosition,
-                maximumPixelXPosition,
-                minimumPixelYPosition,
-                maximumPixelYPosition,
-                pixelCoordinateList
-        );
+        return edgeConnectedComponent;
     }
 
 }

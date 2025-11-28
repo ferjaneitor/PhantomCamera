@@ -11,8 +11,8 @@ import java.util.Arrays;
  */
 public class AprilTagEdgeDetector {
 
-    private final int frameWidthInPixels;
-    private final int frameHeightInPixels;
+    private final int frameWidth;
+    private final int frameHeight;
 
     /**
      * Threshold on gradient magnitude to decide whether a pixel is considered an edge.
@@ -35,15 +35,15 @@ public class AprilTagEdgeDetector {
     private final Mat edgeBinaryFrameMatrix;
 
     public AprilTagEdgeDetector(
-            int frameWidthInPixels,
-            int frameHeightInPixels,
+            int frameWidth,
+            int frameHeight,
             int gradientMagnitudeThresholdValue
     ) {
-        this.frameWidthInPixels = frameWidthInPixels;
-        this.frameHeightInPixels = frameHeightInPixels;
+        this.frameWidth = frameWidth;
+        this.frameHeight = frameHeight;
         this.gradientMagnitudeThresholdValue = gradientMagnitudeThresholdValue;
 
-        int totalPixelCount = frameWidthInPixels * frameHeightInPixels;
+        int totalPixelCount = frameWidth * frameHeight;
 
         this.grayscaleByteArray = new byte[totalPixelCount];
         this.gradientXShortArray = new short[totalPixelCount];
@@ -52,7 +52,7 @@ public class AprilTagEdgeDetector {
         this.edgeBinaryByteArray = new byte[totalPixelCount];
 
         this.edgeBinaryFrameMatrix =
-                new Mat(frameHeightInPixels, frameWidthInPixels, CvType.CV_8UC1);
+                new Mat(frameHeight, frameWidth, CvType.CV_8UC1);
     }
 
     /**
@@ -67,17 +67,17 @@ public class AprilTagEdgeDetector {
             return edgeBinaryFrameMatrix;
         }
 
-        if (grayscaleFrameMatrix.cols() != frameWidthInPixels
-                || grayscaleFrameMatrix.rows() != frameHeightInPixels) {
+        if (grayscaleFrameMatrix.cols() != frameWidth
+                || grayscaleFrameMatrix.rows() != frameHeight) {
             throw new IllegalArgumentException(
                     "Input grayscale frame size does not match edge detector configuration. " +
-                            "Expected " + frameWidthInPixels + "x" + frameHeightInPixels +
+                            "Expected " + frameWidth + "x" + frameHeight +
                             " but received " + grayscaleFrameMatrix.cols() +
                             "x" + grayscaleFrameMatrix.rows()
             );
         }
 
-        int totalPixelCount = frameWidthInPixels * frameHeightInPixels;
+        int totalPixelCount = frameWidth * frameHeight;
 
         // Copy grayscale data from Mat into reusable array
         grayscaleFrameMatrix.get(0, 0, grayscaleByteArray);
@@ -90,18 +90,18 @@ public class AprilTagEdgeDetector {
 
         // Apply Sobel operator (3x3) to compute gradients.
         for (int pixelYPosition = 1;
-             pixelYPosition < frameHeightInPixels - 1;
+             pixelYPosition < frameHeight - 1;
              pixelYPosition++) {
 
             int topRowStartIndex =
-                    (pixelYPosition - 1) * frameWidthInPixels;
+                    (pixelYPosition - 1) * frameWidth;
             int middleRowStartIndex =
-                    pixelYPosition * frameWidthInPixels;
+                    pixelYPosition * frameWidth;
             int bottomRowStartIndex =
-                    (pixelYPosition + 1) * frameWidthInPixels;
+                    (pixelYPosition + 1) * frameWidth;
 
             for (int pixelXPosition = 1;
-                 pixelXPosition < frameWidthInPixels - 1;
+                 pixelXPosition < frameWidth - 1;
                  pixelXPosition++) {
 
                 int pixelXPositionMinusOne = pixelXPosition - 1;

@@ -11,6 +11,7 @@ import org.PhantomCamera.Stadistics.GrayScaleStatistics;
 import org.PhantomCamera.Stadistics.GrayScaleStatistics.GrayscaleFrameStatistics;
 import org.PhantomCamera.Stadistics.EdgeStadistics;
 import org.PhantomCamera.Stadistics.EdgeStadistics.EdgeFrameStatistics;
+import org.PhantomCamera.Utils.DrawingBoxes;
 import org.opencv.core.Mat;
 import org.opencv.core.Point;
 import org.opencv.core.Scalar;
@@ -23,6 +24,7 @@ import java.awt.BorderLayout;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.util.List;
+import java.util.ArrayList;
 
 public class CameraGrayscaleAndEdgeTwoWindowsTest {
 
@@ -153,17 +155,28 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
                     edgeConnectedComponentList.size()
             );
 
-            // --- NEW: compute largest significant component pixel count for density ---
+            // --- NEW: build candidate list and compute statistics ---
+
+            // Lista de componentes candidatos (por ahora: los que tienen al menos N píxeles)
+            List<EdgeConnectedComponent> candidateEdgeConnectedComponentList = new ArrayList<>();
+
             int maximumComponentPixelCount = 0;
+
             for (EdgeConnectedComponent currentEdgeConnectedComponent : edgeConnectedComponentList) {
-                if (currentEdgeConnectedComponent.componentPixelCount >= minimumComponentPixelCountThreshold) {
-                    if (currentEdgeConnectedComponent.componentPixelCount > maximumComponentPixelCount) {
-                        maximumComponentPixelCount = currentEdgeConnectedComponent.componentPixelCount;
+
+                int currentComponentPixelCount = currentEdgeConnectedComponent.componentPixelCount;
+
+                // Solo consideramos candidatos los componentes que tienen al menos este tamaño
+                if (currentComponentPixelCount >= minimumComponentPixelCountThreshold) {
+                    candidateEdgeConnectedComponentList.add(currentEdgeConnectedComponent);
+
+                    if (currentComponentPixelCount > maximumComponentPixelCount) {
+                        maximumComponentPixelCount = currentComponentPixelCount;
                     }
                 }
             }
 
-            // --- NEW: calculate densities and print them to console ---
+            // Densidades globales para debug
             double edgePixelDensity =
                     (double) edgeFrameStatistics.edgePixelCount / (double) totalPixelCount;
 
@@ -176,25 +189,57 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
                     largestComponentPixelDensity
             );
 
+            // Log adicional: cuántos candidatos tenemos
+            int candidateComponentCount = candidateEdgeConnectedComponentList.size();
+
+            System.out.printf(
+                    "component candidates above %d pixels: %d (maximumComponentPixelCount=%d)%n",
+                    minimumComponentPixelCountThreshold,
+                    candidateComponentCount,
+                    maximumComponentPixelCount
+            );
+
             Mat grayscaleFrameForDisplayMatrix = grayscaleFrameMatrix.clone();
+
             Mat edgeBinaryFrameForDisplayMatrix = edgeBinaryFrameMatrix.clone();
 
+            Mat edgeFrameForDrawingMatrix = new Mat();
+            Imgproc.cvtColor(
+                    edgeBinaryFrameMatrix,
+                    edgeFrameForDrawingMatrix,
+                    Imgproc.COLOR_GRAY2BGR
+            );
+
+            // Dibujar overlay de estadísticas en la ventana de grises
             drawGrayscaleStatisticsOnFrame(
                     grayscaleFrameForDisplayMatrix,
                     grayscaleFrameStatistics,
                     currentFrameIndex
             );
 
-            drawEdgeStatisticsOnFrame(
-                    edgeBinaryFrameForDisplayMatrix,
+            // Dibujar estadísticas de bordes + componentes en la ventana de bordes
+            DrawingBoxes.drawEdgeAndComponentStatisticsOnFrame(
+                    edgeFrameForDrawingMatrix,
                     edgeFrameStatistics,
+                    edgeConnectedComponentList.size(),
+                    maximumComponentPixelCount,
+                    candidateComponentCount,
                     currentFrameIndex
             );
 
+            // Dibujar bounding boxes verdes para todos los candidatos
+            DrawingBoxes.drawBoundingBoxesForCandidateComponents(
+                    edgeFrameForDrawingMatrix,
+                    candidateEdgeConnectedComponentList
+            );
+
             // Dibujar el convex hull del componente significativo más grande
+            // Preferimos usar la lista de candidatos; si está vacía, usamos todos los componentes
             drawConvexHullForLargestSignificantEdgeConnectedComponent(
-                    edgeBinaryFrameForDisplayMatrix,
-                    edgeConnectedComponentList,
+                    edgeFrameForDrawingMatrix,
+                    candidateEdgeConnectedComponentList.isEmpty()
+                            ? edgeConnectedComponentList
+                            : candidateEdgeConnectedComponentList,
                     minimumComponentPixelCountThreshold,
                     aprilTagConvexHullCalculator
             );
@@ -203,7 +248,7 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
                     convertOpenCvMatToBufferedImage(grayscaleFrameForDisplayMatrix);
 
             BufferedImage edgeDisplayBufferedImage =
-                    convertOpenCvMatToBufferedImage(edgeBinaryFrameForDisplayMatrix);
+                    convertOpenCvMatToBufferedImage(edgeFrameForDrawingMatrix);
 
             if (grayscaleDisplayBufferedImage != null) {
                 ImageIcon grayscaleImageIconToDisplay = new ImageIcon(grayscaleDisplayBufferedImage);
@@ -401,8 +446,8 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
             System.out.printf(
                     "[ConvexHull] Point %d: (%d, %d)%n",
                     currentIndex,
-                    pixelCoordinate.xPixelPosition,
-                    pixelCoordinate.yPixelPosition
+                    pixelCoordinate.xPixeldCoordinate,
+                    pixelCoordinate.yPixeldCoordinate
             );
         }
 
@@ -425,14 +470,14 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
 
             Point firstPoint =
                     new Point(
-                            firstPixelPosition.xPixelPosition,
-                            firstPixelPosition.yPixelPosition
+                            firstPixelPosition.xPixeldCoordinate,
+                            firstPixelPosition.yPixeldCoordinate
                     );
 
             Point secondPoint =
                     new Point(
-                            secondPixelPosition.xPixelPosition,
-                            secondPixelPosition.yPixelPosition
+                            secondPixelPosition.xPixeldCoordinate,
+                            secondPixelPosition.yPixeldCoordinate
                     );
 
             Imgproc.line(
