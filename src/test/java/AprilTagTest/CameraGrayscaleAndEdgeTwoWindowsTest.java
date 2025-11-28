@@ -1,7 +1,11 @@
 package AprilTagTest;
 
+import org.PhantomCamera.AprilTags.AprilTagConvexHullCalculator;
+import org.PhantomCamera.AprilTags.AprilTagEdgeComponentExtractor;
 import org.PhantomCamera.AprilTags.AprilTagEdgeDetector;
 import org.PhantomCamera.AprilTags.AprilTagFramePreProcessing;
+import org.PhantomCamera.AprilTags.EdgeConnectedComponent;
+import org.PhantomCamera.AprilTags.PixelCoordinate;
 import org.PhantomCamera.Camera.Camera;
 import org.PhantomCamera.Stadistics.GrayScaleStatistics;
 import org.PhantomCamera.Stadistics.GrayScaleStatistics.GrayscaleFrameStatistics;
@@ -18,6 +22,7 @@ import javax.swing.ImageIcon;
 import java.awt.BorderLayout;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
+import java.util.List;
 
 public class CameraGrayscaleAndEdgeTwoWindowsTest {
 
@@ -51,7 +56,7 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
         AprilTagFramePreProcessing aprilTagFramePreProcessing =
                 new AprilTagFramePreProcessing(frameWidthInPixels, frameHeightInPixels);
 
-        int gradientMagnitudeThresholdValue = 60; // puedes ajustar este valor para ver más o menos bordes
+        int gradientMagnitudeThresholdValue = 60;
 
         AprilTagEdgeDetector aprilTagEdgeDetector =
                 new AprilTagEdgeDetector(
@@ -61,6 +66,15 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
                 );
 
         EdgeStadistics edgeStadistics = new EdgeStadistics();
+
+        AprilTagEdgeComponentExtractor aprilTagEdgeComponentExtractor =
+                new AprilTagEdgeComponentExtractor(
+                        frameWidthInPixels,
+                        frameHeightInPixels
+                );
+
+        AprilTagConvexHullCalculator aprilTagConvexHullCalculator =
+                new AprilTagConvexHullCalculator();
 
         // Ventana para escala de grises
         JFrame grayscaleWindowFrame = new JFrame("Grayscale View - Statistics");
@@ -72,7 +86,7 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
         grayscaleWindowFrame.setVisible(true);
 
         // Ventana para bordes
-        JFrame edgeWindowFrame = new JFrame("Edge Map View - Statistics");
+        JFrame edgeWindowFrame = new JFrame("Edge Map View - Statistics And Convex Hull");
         edgeWindowFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         JLabel edgeImageDisplayLabel = new JLabel();
         edgeWindowFrame.getContentPane().add(edgeImageDisplayLabel, BorderLayout.CENTER);
@@ -81,6 +95,8 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
         edgeWindowFrame.setVisible(true);
 
         int maximumNumberOfFramesToProcess = 300;
+
+        int minimumComponentPixelCountThreshold = 200; // ajusta según tu escena
 
         for (int currentFrameIndex = 0;
              currentFrameIndex < maximumNumberOfFramesToProcess
@@ -120,19 +136,46 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
                             aprilTagEdgeDetector.getGradientMagnitudeIntegerArray()
                     );
 
-            // Log a consola para referencia
+            // Obtener componentes conectados de bordes
+            List<EdgeConnectedComponent> edgeConnectedComponentList =
+                    aprilTagEdgeComponentExtractor.extractEdgeConnectedComponentList(edgeBinaryFrameMatrix);
+
             System.out.printf(
                     "Frame %d - grayscale: min=%d, max=%d, average=%.2f | " +
-                            "edges: edgePixelCount=%d, maximumGradientScaleValue=%d%n",
+                            "edges: edgePixelCount=%d, maximumGradientScaleValue=%d | " +
+                            "components: totalComponentCount=%d%n",
                     currentFrameIndex,
                     grayscaleFrameStatistics.minimumIntensityValue,
                     grayscaleFrameStatistics.maximumIntensityValue,
                     grayscaleFrameStatistics.averageIntensityValue,
                     edgeFrameStatistics.edgePixelCount,
-                    edgeFrameStatistics.maximumGradientScaleValue
+                    edgeFrameStatistics.maximumGradientScaleValue,
+                    edgeConnectedComponentList.size()
             );
 
-            // Crear copias para dibujar texto sin modificar las matrices originales
+            // --- NEW: compute largest significant component pixel count for density ---
+            int maximumComponentPixelCount = 0;
+            for (EdgeConnectedComponent currentEdgeConnectedComponent : edgeConnectedComponentList) {
+                if (currentEdgeConnectedComponent.componentPixelCount >= minimumComponentPixelCountThreshold) {
+                    if (currentEdgeConnectedComponent.componentPixelCount > maximumComponentPixelCount) {
+                        maximumComponentPixelCount = currentEdgeConnectedComponent.componentPixelCount;
+                    }
+                }
+            }
+
+            // --- NEW: calculate densities and print them to console ---
+            double edgePixelDensity =
+                    (double) edgeFrameStatistics.edgePixelCount / (double) totalPixelCount;
+
+            double largestComponentPixelDensity =
+                    (double) maximumComponentPixelCount / (double) totalPixelCount;
+
+            System.out.printf(
+                    "densities: edgePixelDensity=%.6f | largestComponentPixelDensity=%.6f%n",
+                    edgePixelDensity,
+                    largestComponentPixelDensity
+            );
+
             Mat grayscaleFrameForDisplayMatrix = grayscaleFrameMatrix.clone();
             Mat edgeBinaryFrameForDisplayMatrix = edgeBinaryFrameMatrix.clone();
 
@@ -146,6 +189,14 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
                     edgeBinaryFrameForDisplayMatrix,
                     edgeFrameStatistics,
                     currentFrameIndex
+            );
+
+            // Dibujar el convex hull del componente significativo más grande
+            drawConvexHullForLargestSignificantEdgeConnectedComponent(
+                    edgeBinaryFrameForDisplayMatrix,
+                    edgeConnectedComponentList,
+                    minimumComponentPixelCountThreshold,
+                    aprilTagConvexHullCalculator
             );
 
             BufferedImage grayscaleDisplayBufferedImage =
@@ -197,10 +248,13 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
                 grayscaleFrameStatistics.averageIntensityValue
         );
 
+        // Log a consola lo mismo que se dibuja
+        System.out.println("[GrayscaleOverlay] " + grayscaleInformationTextLineOne);
+        System.out.println("[GrayscaleOverlay] " + grayscaleInformationTextLineTwo);
+
         Point firstTextOriginPosition = new Point(10, 30);
         Point secondTextOriginPosition = new Point(10, 60);
 
-        // En escala de grises, 255 es blanco
         Scalar textColorScalar = new Scalar(255);
 
         Imgproc.putText(
@@ -240,10 +294,13 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
                 edgeFrameStatistics.maximumGradientScaleValue
         );
 
+        // Log a consola lo mismo que se dibuja
+        System.out.println("[EdgeOverlay] " + edgeInformationTextLineOne);
+        System.out.println("[EdgeOverlay] " + edgeInformationTextLineTwo);
+
         Point firstTextOriginPosition = new Point(10, 30);
         Point secondTextOriginPosition = new Point(10, 60);
 
-        // En mapa de bordes binario, 255 es blanco
         Scalar textColorScalar = new Scalar(255);
 
         Imgproc.putText(
@@ -288,5 +345,103 @@ public class CameraGrayscaleAndEdgeTwoWindowsTest {
         inputMatFrame.get(0, 0, bufferedImageRawDataBytes);
 
         return outputBufferedImage;
+    }
+
+    private static void drawConvexHullForLargestSignificantEdgeConnectedComponent(
+            Mat edgeBinaryFrameMatrix,
+            List<EdgeConnectedComponent> edgeConnectedComponentList,
+            int minimumComponentPixelCountThreshold,
+            AprilTagConvexHullCalculator aprilTagConvexHullCalculator
+    ) {
+        EdgeConnectedComponent largestEdgeConnectedComponent = null;
+
+        for (EdgeConnectedComponent currentEdgeConnectedComponent : edgeConnectedComponentList) {
+
+            if (currentEdgeConnectedComponent.componentPixelCount
+                    < minimumComponentPixelCountThreshold) {
+                continue;
+            }
+
+            if (currentEdgeConnectedComponent.pixelCoordinateList == null
+                    || currentEdgeConnectedComponent.pixelCoordinateList.isEmpty()) {
+                continue;
+            }
+
+            if (largestEdgeConnectedComponent == null
+                    || currentEdgeConnectedComponent.componentPixelCount
+                    > largestEdgeConnectedComponent.componentPixelCount) {
+
+                largestEdgeConnectedComponent = currentEdgeConnectedComponent;
+            }
+        }
+
+        if (largestEdgeConnectedComponent == null) {
+            System.out.println("[ConvexHull] No significant component found (above threshold "
+                    + minimumComponentPixelCountThreshold + ").");
+            return;
+        }
+
+        System.out.println("[ConvexHull] Largest component pixel count: "
+                + largestEdgeConnectedComponent.componentPixelCount);
+
+        List<PixelCoordinate> convexHullPixelPositionList =
+                aprilTagConvexHullCalculator.calculateConvexHullPixelPositionList(
+                        largestEdgeConnectedComponent.pixelCoordinateList
+                );
+
+        if (convexHullPixelPositionList == null
+                || convexHullPixelPositionList.size() < 2) {
+            System.out.println("[ConvexHull] Convex hull has fewer than 2 points. Nothing to draw.");
+            return;
+        }
+
+        System.out.println("[ConvexHull] Convex hull point count: " + convexHullPixelPositionList.size());
+        for (int currentIndex = 0; currentIndex < convexHullPixelPositionList.size(); currentIndex++) {
+            PixelCoordinate pixelCoordinate = convexHullPixelPositionList.get(currentIndex);
+            System.out.printf(
+                    "[ConvexHull] Point %d: (%d, %d)%n",
+                    currentIndex,
+                    pixelCoordinate.xPixelPosition,
+                    pixelCoordinate.yPixelPosition
+            );
+        }
+
+        Scalar hullLineColorScalar = new Scalar(255);
+        int hullLineThicknessInPixels = 2;
+
+        int convexHullPointCount = convexHullPixelPositionList.size();
+
+        for (int currentIndex = 0;
+             currentIndex < convexHullPointCount;
+             currentIndex++) {
+
+            PixelCoordinate firstPixelPosition =
+                    convexHullPixelPositionList.get(currentIndex);
+
+            PixelCoordinate secondPixelPosition =
+                    convexHullPixelPositionList.get(
+                            (currentIndex + 1) % convexHullPointCount
+                    );
+
+            Point firstPoint =
+                    new Point(
+                            firstPixelPosition.xPixelPosition,
+                            firstPixelPosition.yPixelPosition
+                    );
+
+            Point secondPoint =
+                    new Point(
+                            secondPixelPosition.xPixelPosition,
+                            secondPixelPosition.yPixelPosition
+                    );
+
+            Imgproc.line(
+                    edgeBinaryFrameMatrix,
+                    firstPoint,
+                    secondPoint,
+                    hullLineColorScalar,
+                    hullLineThicknessInPixels
+            );
+        }
     }
 }
