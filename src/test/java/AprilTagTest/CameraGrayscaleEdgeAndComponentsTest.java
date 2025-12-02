@@ -1,17 +1,13 @@
 package AprilTagTest;
 
-import org.PhantomCamera.AprilTags.AprilTagEdgeComponentExtractor;
-import org.PhantomCamera.AprilTags.AprilTagEdgeDetector;
-import org.PhantomCamera.AprilTags.AprilTagFramePreProcessing;
-import org.PhantomCamera.AprilTags.EdgeConnectedComponent;
+import org.PhantomCamera.AprilTags.*;
 import org.PhantomCamera.Camera.Camera;
 import org.PhantomCamera.Stadistics.GrayScaleStatistics;
 import org.PhantomCamera.Stadistics.GrayScaleStatistics.GrayscaleFrameStatistics;
 import org.PhantomCamera.Stadistics.EdgeStadistics;
 import org.PhantomCamera.Stadistics.EdgeStadistics.EdgeFrameStatistics;
+import org.PhantomCamera.Utils.DrawingBoxes;
 import org.opencv.core.Mat;
-import org.opencv.core.Point;
-import org.opencv.core.Scalar;
 import org.opencv.imgproc.Imgproc;
 
 import javax.swing.JFrame;
@@ -24,6 +20,28 @@ import java.util.List;
 
 public class CameraGrayscaleEdgeAndComponentsTest {
 
+    // Heuristics for filtering edge connected components that are likely to be AprilTags
+    private static final double MAXIMUM_BOUNDING_BOX_AREA_FRACTION_OF_FRAME = 0.50;
+    private static final double MINIMUM_COMPONENT_FILL_RATIO_WITHIN_BOUNDING_BOX = 0.05;
+
+    private static final int gradientMagnitudeThresholdValue = 80;
+
+    private static EdgeStadistics edgeStadistics = new EdgeStadistics();
+
+    private static final int maximumNumberOfFramesToProcess = 200;
+
+    // Thresholds for bounding boxes
+    private static final int minimumComponentPixelCountThreshold = 2000;     // adjust depending on scene
+    private static final int minimumBoundingBoxSideLengthInPixels = 20;      // minimum size in pixels
+
+    // Global maximum observed component pixel count across all frames
+    private static int maximumComponentPixelCount = 0;
+
+    private static Camera cameraInstance = new Camera();
+
+    private static AprilTagQuadrilateralFitter aprilTagQuadrilateralFitter =
+            new AprilTagQuadrilateralFitter();
+
     public static void main(String[] args) {
         try {
             runCameraGrayscaleEdgeAndComponentsTest();
@@ -35,7 +53,6 @@ public class CameraGrayscaleEdgeAndComponentsTest {
 
     private static void runCameraGrayscaleEdgeAndComponentsTest() {
 
-        Camera cameraInstance = new Camera();
         if (!cameraInstance.isOpened()) {
             System.out.println("Camera could not be opened.");
             return;
@@ -50,11 +67,10 @@ public class CameraGrayscaleEdgeAndComponentsTest {
 
         int frameWidthInPixels = initialColorFrameMatrix.cols();
         int frameHeightInPixels = initialColorFrameMatrix.rows();
+        int frameAreaInPixels = frameWidthInPixels * frameHeightInPixels;
 
         AprilTagFramePreProcessing aprilTagFramePreProcessing =
                 new AprilTagFramePreProcessing(frameWidthInPixels, frameHeightInPixels);
-
-        int gradientMagnitudeThresholdValue = 80;
 
         AprilTagEdgeDetector aprilTagEdgeDetector =
                 new AprilTagEdgeDetector(
@@ -63,15 +79,16 @@ public class CameraGrayscaleEdgeAndComponentsTest {
                         gradientMagnitudeThresholdValue
                 );
 
-        EdgeStadistics edgeStadistics = new EdgeStadistics();
-
         AprilTagEdgeComponentExtractor aprilTagEdgeComponentExtractor =
                 new AprilTagEdgeComponentExtractor(
                         frameWidthInPixels,
                         frameHeightInPixels
                 );
 
-        // Ventana para escala de grises
+        AprilTagConvexHullCalculator aprilTagConvexHullCalculator =
+                new AprilTagConvexHullCalculator();
+
+        // Grayscale window
         JFrame grayscaleWindowFrame = new JFrame("Grayscale View - Statistics");
         grayscaleWindowFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         JLabel grayscaleImageDisplayLabel = new JLabel();
@@ -80,7 +97,7 @@ public class CameraGrayscaleEdgeAndComponentsTest {
         grayscaleWindowFrame.setLocation(100, 100);
         grayscaleWindowFrame.setVisible(true);
 
-        // Ventana para bordes
+        // Edge window
         JFrame edgeWindowFrame = new JFrame("Edge Map View - Edges And Components Statistics");
         edgeWindowFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         JLabel edgeImageDisplayLabel = new JLabel();
@@ -88,12 +105,6 @@ public class CameraGrayscaleEdgeAndComponentsTest {
         edgeWindowFrame.setSize(frameWidthInPixels, frameHeightInPixels);
         edgeWindowFrame.setLocation(150 + frameWidthInPixels, 100);
         edgeWindowFrame.setVisible(true);
-
-        int maximumNumberOfFramesToProcess = 200;
-
-        // Umbrales para los bounding boxes
-        int minimumComponentPixelCountThreshold = 2000;     // ajusta según la escena
-        int minimumBoundingBoxSideLengthInPixels = 20;     // tamaño mínimo en píxeles
 
         for (int currentFrameIndex = 0;
              currentFrameIndex < maximumNumberOfFramesToProcess
@@ -137,20 +148,72 @@ public class CameraGrayscaleEdgeAndComponentsTest {
                     aprilTagEdgeComponentExtractor.extractEdgeConnectedComponentList(edgeBinaryFrameMatrix);
 
             int totalComponentCount = edgeConnectedComponentList.size();
-            int maximumComponentPixelCount = 0;
 
-            for (EdgeConnectedComponent edgeConnectedComponent
-                    : edgeConnectedComponentList) {
+            // Filter candidate components based on heuristics
+            List<EdgeConnectedComponent> filteredCandidateEdgeConnectedComponentList =
+                    new java.util.ArrayList<>();
 
-                if (edgeConnectedComponent.componentPixelCount > maximumComponentPixelCount) {
-                    maximumComponentPixelCount = edgeConnectedComponent.componentPixelCount;
+            int filteredMaximumComponentPixelCount = 0;
+
+            for (EdgeConnectedComponent currentEdgeConnectedComponent : edgeConnectedComponentList) {
+
+                // Update global maximum observed component pixel count
+                if (currentEdgeConnectedComponent.componentPixelCount > maximumComponentPixelCount) {
+                    maximumComponentPixelCount = currentEdgeConnectedComponent.componentPixelCount;
                 }
+
+                // Filter 0: minimum component pixel count threshold
+                if (currentEdgeConnectedComponent.componentPixelCount < minimumComponentPixelCountThreshold) {
+                    continue;
+                }
+
+                int componentBoundingBoxAreaInPixels =
+                        currentEdgeConnectedComponent.getComponentBoundingBoxAreaInPixels();
+
+                if (componentBoundingBoxAreaInPixels <= 0) {
+                    continue;
+                }
+
+                double componentBoundingBoxAreaFractionOfFrame =
+                        (double) componentBoundingBoxAreaInPixels / (double) frameAreaInPixels;
+
+                double componentFillRatioWithinBoundingBox =
+                        currentEdgeConnectedComponent.getComponentFillRatioWithinBoundingBox();
+
+                // Heuristic 1: discard components whose bounding box is too large relative to the frame
+                if (componentBoundingBoxAreaFractionOfFrame > MAXIMUM_BOUNDING_BOX_AREA_FRACTION_OF_FRAME) {
+                    continue;
+                }
+
+                // Heuristic 2: discard components with low fill ratio within their bounding box
+                if (componentFillRatioWithinBoundingBox < MINIMUM_COMPONENT_FILL_RATIO_WITHIN_BOUNDING_BOX) {
+                    continue;
+                }
+
+                // At this point the component passes all filters and is considered a candidate
+                filteredCandidateEdgeConnectedComponentList.add(currentEdgeConnectedComponent);
+
+                if (currentEdgeConnectedComponent.componentPixelCount > filteredMaximumComponentPixelCount) {
+                    filteredMaximumComponentPixelCount = currentEdgeConnectedComponent.componentPixelCount;
+                }
+
+                // Detailed logging for each candidate component
+                System.out.printf(
+                        "[CandidateFilter] label=%d pixelCount=%d bboxArea=%d bboxAreaFraction=%.4f fillRatio=%.4f%n",
+                        currentEdgeConnectedComponent.componentLabelValue,
+                        currentEdgeConnectedComponent.componentPixelCount,
+                        componentBoundingBoxAreaInPixels,
+                        componentBoundingBoxAreaFractionOfFrame,
+                        componentFillRatioWithinBoundingBox
+                );
             }
 
+            // Frame-level logging including candidate information
             System.out.printf(
                     "Frame %d - grayscale: min=%d, max=%d, average=%.2f | " +
                             "edges: edgePixelCount=%d, maximumGradientScaleValue=%d | " +
-                            "components: totalComponentCount=%d, maximumComponentPixelCount=%d%n",
+                            "components: totalComponentCount=%d, maximumComponentPixelCount=%d, " +
+                            "candidateComponentCount=%d, filteredMaximumComponentPixelCount=%d%n",
                     currentFrameIndex,
                     grayscaleFrameStatistics.minimumIntensityValue,
                     grayscaleFrameStatistics.maximumIntensityValue,
@@ -158,40 +221,58 @@ public class CameraGrayscaleEdgeAndComponentsTest {
                     edgeFrameStatistics.edgePixelCount,
                     edgeFrameStatistics.maximumGradientScaleValue,
                     totalComponentCount,
-                    maximumComponentPixelCount
+                    maximumComponentPixelCount,
+                    filteredCandidateEdgeConnectedComponentList.size(),
+                    filteredMaximumComponentPixelCount
             );
 
-            // Copias para dibujar texto y cajas sin modificar las matrices originales de procesamiento
+            // Copies for overlay drawing without modifying the original processing matrices
             Mat grayscaleFrameForDisplayMatrix = grayscaleFrameMatrix.clone();
             Mat edgeBinaryFrameForDisplayMatrix = edgeBinaryFrameMatrix.clone();
 
+            // For grayscale window we keep a single channel image
             drawGrayscaleStatisticsOnFrame(
                     grayscaleFrameForDisplayMatrix,
                     grayscaleFrameStatistics,
                     currentFrameIndex
             );
 
-            drawEdgeAndComponentStatisticsOnFrame(
+            // For edge window we convert to BGR so that colored overlays are visible
+            Mat edgeBinaryFrameForDisplayColorMatrix = new Mat();
+            Imgproc.cvtColor(
                     edgeBinaryFrameForDisplayMatrix,
+                    edgeBinaryFrameForDisplayColorMatrix,
+                    Imgproc.COLOR_GRAY2BGR
+            );
+
+            // Draw statistics, bounding boxes and convex hull using the filtered candidates
+            DrawingBoxes.drawEdgeAndComponentStatisticsOnFrame(
+                    edgeBinaryFrameForDisplayColorMatrix,
                     edgeFrameStatistics,
                     totalComponentCount,
-                    maximumComponentPixelCount,
+                    filteredMaximumComponentPixelCount,
+                    filteredCandidateEdgeConnectedComponentList.size(),
                     currentFrameIndex
             );
 
-            // Dibujar bounding boxes de componentes significativos
-            drawBoundingBoxesForSignificantEdgeConnectedComponents(
-                    edgeBinaryFrameForDisplayMatrix,
-                    edgeConnectedComponentList,
+            DrawingBoxes.drawBoundingBoxesForCandidateComponents(
+                    edgeBinaryFrameForDisplayColorMatrix,
+                    filteredCandidateEdgeConnectedComponentList
+            );
+
+            DrawingBoxes.drawConvexHullForLargestSignificantEdgeConnectedComponent(
+                    edgeBinaryFrameForDisplayColorMatrix,
+                    filteredCandidateEdgeConnectedComponentList,
                     minimumComponentPixelCountThreshold,
-                    minimumBoundingBoxSideLengthInPixels
+                    aprilTagConvexHullCalculator,
+                    aprilTagQuadrilateralFitter
             );
 
             BufferedImage grayscaleDisplayBufferedImage =
                     convertOpenCvMatToBufferedImage(grayscaleFrameForDisplayMatrix);
 
             BufferedImage edgeDisplayBufferedImage =
-                    convertOpenCvMatToBufferedImage(edgeBinaryFrameForDisplayMatrix);
+                    convertOpenCvMatToBufferedImage(edgeBinaryFrameForDisplayColorMatrix);
 
             if (grayscaleDisplayBufferedImage != null) {
                 ImageIcon grayscaleImageIconToDisplay = new ImageIcon(grayscaleDisplayBufferedImage);
@@ -236,10 +317,10 @@ public class CameraGrayscaleEdgeAndComponentsTest {
                 grayscaleFrameStatistics.averageIntensityValue
         );
 
-        Point firstTextOriginPosition = new Point(10, 30);
-        Point secondTextOriginPosition = new Point(10, 60);
+        org.opencv.core.Point firstTextOriginPosition = new org.opencv.core.Point(10, 30);
+        org.opencv.core.Point secondTextOriginPosition = new org.opencv.core.Point(10, 60);
 
-        Scalar textColorScalar = new Scalar(255);
+        org.opencv.core.Scalar textColorScalar = new org.opencv.core.Scalar(255);
 
         Imgproc.putText(
                 grayscaleFrameMatrix,
@@ -255,67 +336,6 @@ public class CameraGrayscaleEdgeAndComponentsTest {
                 grayscaleFrameMatrix,
                 grayscaleInformationTextValues,
                 secondTextOriginPosition,
-                Imgproc.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                textColorScalar,
-                2
-        );
-    }
-
-    private static void drawEdgeAndComponentStatisticsOnFrame(
-            Mat edgeBinaryFrameMatrix,
-            EdgeFrameStatistics edgeFrameStatistics,
-            int totalComponentCount,
-            int maximumComponentPixelCount,
-            int currentFrameIndex
-    ) {
-        String edgeInformationTextHeader = String.format(
-                "Frame %d - Edge Map And Components",
-                currentFrameIndex
-        );
-
-        String edgeInformationTextEdges = String.format(
-                "EdgePixels=%d MaxGradient=%d",
-                edgeFrameStatistics.edgePixelCount,
-                edgeFrameStatistics.maximumGradientScaleValue
-        );
-
-        String edgeInformationTextComponents = String.format(
-                "Components=%d MaxComponentPixels=%d",
-                totalComponentCount,
-                maximumComponentPixelCount
-        );
-
-        Point firstTextOriginPosition = new Point(10, 30);
-        Point secondTextOriginPosition = new Point(10, 60);
-        Point thirdTextOriginPosition = new Point(10, 90);
-
-        Scalar textColorScalar = new Scalar(255);
-
-        Imgproc.putText(
-                edgeBinaryFrameMatrix,
-                edgeInformationTextHeader,
-                firstTextOriginPosition,
-                Imgproc.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                textColorScalar,
-                2
-        );
-
-        Imgproc.putText(
-                edgeBinaryFrameMatrix,
-                edgeInformationTextEdges,
-                secondTextOriginPosition,
-                Imgproc.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                textColorScalar,
-                2
-        );
-
-        Imgproc.putText(
-                edgeBinaryFrameMatrix,
-                edgeInformationTextComponents,
-                thirdTextOriginPosition,
                 Imgproc.FONT_HERSHEY_SIMPLEX,
                 0.8,
                 textColorScalar,
@@ -344,56 +364,5 @@ public class CameraGrayscaleEdgeAndComponentsTest {
         inputMatFrame.get(0, 0, bufferedImageRawDataBytes);
 
         return outputBufferedImage;
-    }
-
-    private static void drawBoundingBoxesForSignificantEdgeConnectedComponents(
-            Mat edgeBinaryFrameMatrix,
-            List<EdgeConnectedComponent> edgeConnectedComponentList,
-            int minimumComponentPixelCountThreshold,
-            int minimumBoundingBoxSideLengthInPixels
-    ) {
-        Scalar rectangleColorScalar = new Scalar(255);
-        int rectangleThicknessInPixels = 2;
-
-        for (EdgeConnectedComponent edgeConnectedComponent : edgeConnectedComponentList) {
-
-            int componentPixelCount = edgeConnectedComponent.componentPixelCount;
-
-            if (componentPixelCount < minimumComponentPixelCountThreshold) {
-                continue;
-            }
-
-            int minimumPixelXPosition = edgeConnectedComponent.minimumXCoordinate;
-            int maximumPixelXPosition = edgeConnectedComponent.maximumXCoordinate;
-            int minimumPixelYPosition = edgeConnectedComponent.minimumYCoordinate;
-            int maximumPixelYPosition = edgeConnectedComponent.maximumYCoordinate;
-
-            int boundingBoxWidthInPixels =
-                    maximumPixelXPosition - minimumPixelXPosition + 1;
-            int boundingBoxHeightInPixels =
-                    maximumPixelYPosition - minimumPixelYPosition + 1;
-
-            int minimumBoundingBoxSideLengthInPixelsCurrentComponent =
-                    Math.min(boundingBoxWidthInPixels, boundingBoxHeightInPixels);
-
-            if (minimumBoundingBoxSideLengthInPixelsCurrentComponent
-                    < minimumBoundingBoxSideLengthInPixels) {
-                continue;
-            }
-
-            Point topLeftCornerPoint =
-                    new Point(minimumPixelXPosition, minimumPixelYPosition);
-
-            Point bottomRightCornerPoint =
-                    new Point(maximumPixelXPosition, maximumPixelYPosition);
-
-            Imgproc.rectangle(
-                    edgeBinaryFrameMatrix,
-                    topLeftCornerPoint,
-                    bottomRightCornerPoint,
-                    rectangleColorScalar,
-                    rectangleThicknessInPixels
-            );
-        }
     }
 }

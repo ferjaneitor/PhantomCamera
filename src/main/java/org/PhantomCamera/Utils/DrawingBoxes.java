@@ -1,6 +1,7 @@
 package org.PhantomCamera.Utils;
 
 import org.PhantomCamera.AprilTags.AprilTagConvexHullCalculator;
+import org.PhantomCamera.AprilTags.AprilTagQuadrilateralFitter;
 import org.PhantomCamera.AprilTags.EdgeConnectedComponent;
 import org.PhantomCamera.AprilTags.PixelCoordinate;
 import org.PhantomCamera.Stadistics.EdgeStadistics.EdgeFrameStatistics;
@@ -29,10 +30,10 @@ public class DrawingBoxes {
             int minimumYCoordinate = edgeConnectedComponent.minimumYCoordinate;
             int maximumYCoordinate = edgeConnectedComponent.maximumYCoordinate;
 
-            org.opencv.core.Point topLeftPoint =
-                    new org.opencv.core.Point(minimumXCoordinate, minimumYCoordinate);
-            org.opencv.core.Point bottomRightPoint =
-                    new org.opencv.core.Point(maximumXCoordinate, maximumYCoordinate);
+            Point topLeftPoint =
+                    new Point(minimumXCoordinate, minimumYCoordinate);
+            Point bottomRightPoint =
+                    new Point(maximumXCoordinate, maximumYCoordinate);
 
             Imgproc.rectangle(
                     edgeFrameColorMatrix,
@@ -83,9 +84,9 @@ public class DrawingBoxes {
                 candidateComponentCount
         );
 
-        org.opencv.core.Point firstTextOriginPosition = new org.opencv.core.Point(10, 30);
-        org.opencv.core.Point secondTextOriginPosition = new org.opencv.core.Point(10, 60);
-        org.opencv.core.Point thirdTextOriginPosition = new org.opencv.core.Point(10, 90);
+        Point firstTextOriginPosition = new Point(10, 30);
+        Point secondTextOriginPosition = new Point(10, 60);
+        Point thirdTextOriginPosition = new Point(10, 90);
 
         Scalar textColorScalar = new Scalar(255, 255, 255);
 
@@ -125,15 +126,16 @@ public class DrawingBoxes {
         System.out.println("[EdgeStatsOverlay] " + edgeInformationTextComponents);
     }
 
-    private static void drawConvexHullForLargestSignificantEdgeConnectedComponent(
+    public static void drawConvexHullForLargestSignificantEdgeConnectedComponent(
             Mat edgeFrameForDrawingMatrix,
-            List<EdgeConnectedComponent> edgeConnectedComponentList,
+            List<EdgeConnectedComponent> candidateEdgeConnectedComponentList,
             int minimumComponentPixelCountThreshold,
-            AprilTagConvexHullCalculator aprilTagConvexHullCalculator
+            AprilTagConvexHullCalculator aprilTagConvexHullCalculator,
+            AprilTagQuadrilateralFitter aprilTagQuadrilateralFitter
     ) {
         EdgeConnectedComponent largestEdgeConnectedComponent = null;
 
-        for (EdgeConnectedComponent currentEdgeConnectedComponent : edgeConnectedComponentList) {
+        for (EdgeConnectedComponent currentEdgeConnectedComponent : candidateEdgeConnectedComponentList) {
 
             if (currentEdgeConnectedComponent.componentPixelCount
                     < minimumComponentPixelCountThreshold) {
@@ -187,7 +189,39 @@ public class DrawingBoxes {
             );
         }
 
-        Scalar hullLineColorScalar = new Scalar(0, 0, 255); // rojo en BGR
+        // ===== BLOQUE QUE QUERÍAS INSERTAR =====
+        PixelCoordinate[] quadrilateralCornerArray =
+                aprilTagQuadrilateralFitter
+                        .calculateQuadrilateralCornerArrayFromConvexHullPixelCoordinateList(
+                                convexHullPixelPositionList
+                        );
+
+        if (quadrilateralCornerArray == null) {
+            System.out.println("[Quadrilateral] Could not approximate convex hull with four corner points.");
+        } else {
+            System.out.println("[Quadrilateral] Corner points in order (topLeft, topRight, bottomRight, bottomLeft):");
+            for (int currentIndex = 0;
+                 currentIndex < quadrilateralCornerArray.length;
+                 currentIndex++) {
+
+                PixelCoordinate pixelCoordinate = quadrilateralCornerArray[currentIndex];
+                System.out.printf(
+                        "[Quadrilateral] Corner %d: (%d, %d)%n",
+                        currentIndex,
+                        pixelCoordinate.xPixeldCoordinate,
+                        pixelCoordinate.yPixeldCoordinate
+                );
+            }
+
+            // Dibujar el cuadrilátero en la misma imagen de bordes
+            DrawingBoxes.drawQuadrilateralOnEdgeFrame(
+                    edgeFrameForDrawingMatrix,
+                    quadrilateralCornerArray
+            );
+        }
+        // ===== FIN DEL BLOQUE INSERTADO =====
+
+        Scalar hullLineColorScalar = new Scalar(0, 0, 255); // red in BGR
         int hullLineThicknessInPixels = 2;
 
         int convexHullPointCount = convexHullPixelPositionList.size();
@@ -231,6 +265,52 @@ public class DrawingBoxes {
                     firstPixelPosition.yPixeldCoordinate,
                     secondPixelPosition.xPixeldCoordinate,
                     secondPixelPosition.yPixeldCoordinate
+            );
+        }
+    }
+
+    public static void drawQuadrilateralOnEdgeFrame(
+            Mat edgeFrameMatrix,
+            PixelCoordinate[] quadrilateralCornerArray
+    ) {
+        if (quadrilateralCornerArray == null
+                || quadrilateralCornerArray.length != 4) {
+            return;
+        }
+
+        org.opencv.core.Scalar quadrilateralColorScalar =
+                new org.opencv.core.Scalar(0, 0, 255); // rojo BGR
+
+        int quadrilateralLineThicknessInPixels = 2;
+
+        for (int currentIndex = 0;
+             currentIndex < quadrilateralCornerArray.length;
+             currentIndex++) {
+
+            PixelCoordinate firstCornerPixelCoordinate =
+                    quadrilateralCornerArray[currentIndex];
+
+            PixelCoordinate secondCornerPixelCoordinate =
+                    quadrilateralCornerArray[
+                            (currentIndex + 1) % quadrilateralCornerArray.length
+                            ];
+
+            org.opencv.core.Point firstPoint = new org.opencv.core.Point(
+                    firstCornerPixelCoordinate.xPixeldCoordinate,
+                    firstCornerPixelCoordinate.yPixeldCoordinate
+            );
+
+            org.opencv.core.Point secondPoint = new org.opencv.core.Point(
+                    secondCornerPixelCoordinate.xPixeldCoordinate,
+                    secondCornerPixelCoordinate.yPixeldCoordinate
+            );
+
+            Imgproc.line(
+                    edgeFrameMatrix,
+                    firstPoint,
+                    secondPoint,
+                    quadrilateralColorScalar,
+                    quadrilateralLineThicknessInPixels
             );
         }
     }

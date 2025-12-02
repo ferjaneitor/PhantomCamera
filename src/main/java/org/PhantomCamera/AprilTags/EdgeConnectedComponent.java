@@ -87,4 +87,13 @@ public class EdgeConnectedComponent {
 
         return (double) componentWidthInPixels / (double) componentHeightInPixels;
     }
+
+    public double getComponentFillRatioWithinBoundingBox() {
+        int boundingBoxAreaInPixels = getComponentBoundingBoxAreaInPixels();
+        if (boundingBoxAreaInPixels <= 0) {
+            return 0.0;
+        }
+        return (double) componentPixelCount / (double) boundingBoxAreaInPixels;
+    }
+
 }
